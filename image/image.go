@@ -2,6 +2,7 @@ package image
 
 import (
 	//"bytes"
+	"bytes"
 	"github.com/rstms/ffs"
 	"github.com/rstms/ffs/fat"
 	"io"
@@ -49,7 +50,7 @@ func OpenImage(filename string) (*Image, error) {
 	return &i, nil
 }
 
-func CreateImage(filename, label, oem string, bits int, size int64) (*Image, error) {
+func CreateImage(filename, volumeLabel, oemName string, fatType int, size int64) (*Image, error) {
 	i := Image{Filename: filename}
 	var err error
 	err = i.createImageFile(size)
@@ -60,7 +61,7 @@ func CreateImage(filename, label, oem string, bits int, size int64) (*Image, err
 	if err != nil {
 		return nil, Fatal(err)
 	}
-	err = i.format(bits, label, oem)
+	err = i.format(fatType, volumeLabel, oemName)
 	if err != nil {
 		return nil, Fatal(err)
 	}
@@ -117,6 +118,7 @@ func (i *Image) ScanFiles() ([]FileRecord, error) {
 }
 
 func (i *Image) AddFile(dstPathname, srcPathname string) error {
+	//log.Printf("AddFile: dst=%s src=%s\n", dstPathname, srcPathname)
 	srcInfo, err := os.Stat(srcPathname)
 	if err != nil {
 		return Fatal(err)
@@ -152,21 +154,24 @@ func (i *Image) AddFile(dstPathname, srcPathname string) error {
 	return nil
 }
 
-func MungeImage(dstFilename, srcFilename string, files []string) error {
+func MungeImage(dstFilename, srcFilename string, basename string, files []string) error {
 
-	info, err := os.Stat(srcFilename)
+	srcFileInfo, err := os.Stat(srcFilename)
 	if err != nil {
 		return Fatal(err)
 	}
+	size := srcFileInfo.Size()
 
-	dstSize := info.Size()
-	for _, filename := range files {
-		info, err := os.Stat(filename)
-		if err != nil {
-			return Fatal(err)
+	/*
+		dstSize := info.Size()
+		for _, filename := range files {
+			info, err := os.Stat(filename)
+			if err != nil {
+				return Fatal(err)
+			}
+			dstSize += info.Size() + int64(PAD_BYTES)
 		}
-		dstSize += info.Size() + int64(PAD_BYTES)
-	}
+	*/
 
 	srcImage, err := OpenImage(srcFilename)
 	if err != nil {
@@ -174,7 +179,20 @@ func MungeImage(dstFilename, srcFilename string, files []string) error {
 	}
 	defer srcImage.Close()
 
-	dstImage, err := CreateImage(dstFilename, "munged", "ffs", 12, dstSize)
+	volume, err := srcImage.VolumeLabel()
+	if err != nil {
+		return Fatal(err)
+	}
+	oem, err := srcImage.OEMName()
+	if err != nil {
+		return Fatal(err)
+	}
+	fatType, err := srcImage.FATType()
+	if err != nil {
+		return Fatal(err)
+	}
+
+	dstImage, err := CreateImage(dstFilename, volume, oem, fatType, size)
 	if err != nil {
 		return Fatal(err)
 	}
@@ -199,11 +217,71 @@ func MungeImage(dstFilename, srcFilename string, files []string) error {
 		}
 	}
 
+	for _, file := range files {
+		destName, err := filepath.Rel(basename, file)
+		if err != nil {
+			return Fatal(err)
+		}
+		err = dstImage.AddFile(destName, file)
+		if err != nil {
+			return Fatal(err)
+		}
+	}
+
 	return nil
 }
 
 func copyFile(dst, src *Image, record FileRecord) error {
-	log.Printf("copyFile: dst=%+v src=%+v record=%+v\n", dst, src, record)
+	path, name := filepath.Split(record.Name)
+	srcDir, err := src.getDir(path)
+	if err != nil {
+		return Fatal(err)
+	}
+	srcEntry := srcDir.Entry(name)
+	if srcEntry == nil {
+		return Fatalf("src not found: %s", record.Name)
+	}
+	srcFile, err := srcEntry.File()
+	if err != nil {
+		return Fatal(err)
+	}
+	defer srcFile.Close()
+	dstDir, err := dst.getDir(path)
+	if err != nil {
+		return Fatal(err)
+	}
+	dstEntry, err := dstDir.AddFile(name)
+	if err != nil {
+		return Fatal(err)
+	}
+	dstFile, err := dstEntry.File()
+	if err != nil {
+		return Fatal(err)
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return Fatal(err)
+	}
+	if record.Hidden {
+		err := dstEntry.SetAttr(ffs.AttrHidden, true)
+		if err != nil {
+			return Fatal(err)
+		}
+	}
+	if record.System {
+		err := dstEntry.SetAttr(ffs.AttrSystem, true)
+		if err != nil {
+			return Fatal(err)
+		}
+	}
+	if record.ReadOnly {
+		err := dstEntry.SetAttr(ffs.AttrReadOnly, true)
+		if err != nil {
+			return Fatal(err)
+		}
+	}
 	return nil
 }
 
@@ -214,26 +292,26 @@ func (i *Image) searchDir(name string) (ffs.Directory, error) {
 	}
 	name = strings.Trim(name, "/")
 	if name == "" {
-		log.Println("root exists")
+		//log.Println("root exists")
 		return dir, nil
 	}
 	subdirs := strings.Split(name, "/")
-	log.Printf("subdirs: %d %+v\n", len(subdirs), subdirs)
-	for i, sub := range subdirs {
-		log.Printf("checking sub[%d]: %s\n", i, sub)
+	//log.Printf("subdirs: %d %+v\n", len(subdirs), subdirs)
+	for _, sub := range subdirs {
+		//log.Printf("checking sub[%d]: %s\n", i, sub)
 		entry := dir.Entry(sub)
 		if entry == nil {
 			// no entry present with this name
-			log.Printf("sub=%s not found\n", sub)
+			//log.Printf("sub=%s not found\n", sub)
 			return nil, nil
 		}
 		if !entry.IsDir() {
 			// entry found, but not a directory
-			log.Printf("sub=%s entry=%s not a dir\n", sub, entry.Name())
+			//log.Printf("sub=%s entry=%s not a dir\n", sub, entry.Name())
 			return nil, nil
 		}
 		// step to the next directory
-		log.Printf("sub=%s entry=%s is dir, descending\n", sub, entry.Name())
+		//log.Printf("sub=%s entry=%s is dir, descending\n", sub, entry.Name())
 		dir, err = entry.Dir()
 		if err != nil {
 			return nil, Fatal(err)
@@ -262,6 +340,7 @@ func (i *Image) IsDir(name string) (bool, error) {
 }
 
 func (i *Image) Mkdir(pathname string) error {
+	//log.Printf("Mkdir: %s\n", pathname)
 	exists, err := i.IsDir(pathname)
 	if err != nil {
 		return Fatal(err)
@@ -289,11 +368,11 @@ func scanFileSizes(filenames []string, pad int64) (int64, error) {
 
 // create, truncate, and reopen the output file
 func (i *Image) createImageFile(size int64) error {
-	log.Printf("size before rounding: %d\n", size)
+	//log.Printf("size before rounding: %d\n", size)
 	if size%int64(1024) != 0 {
 		size = (size/int64(1024) + 1) * int64(1024)
 	}
-	log.Printf("size after rounding: %d\n", size)
+	//log.Printf("size after rounding: %d\n", size)
 	var err error
 	i.file, err = os.OpenFile(i.Filename, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0600)
 	if err != nil {
@@ -306,9 +385,9 @@ func (i *Image) createImageFile(size int64) error {
 	return nil
 }
 
-func (i *Image) format(bits int, label, oem string) error {
+func (i *Image) format(fatType int, volumeLabel, oemName string) error {
 	var ftype fat.FATType
-	switch bits {
+	switch fatType {
 	case 12:
 		ftype = fat.FAT12
 	case 16:
@@ -320,8 +399,8 @@ func (i *Image) format(bits int, label, oem string) error {
 	}
 	formatConfig := &fat.SuperFloppyConfig{
 		FATType: ftype,
-		Label:   label,
-		OEMName: oem,
+		Label:   volumeLabel,
+		OEMName: oemName,
 	}
 	err := fat.FormatSuperFloppy(i.disk, formatConfig)
 	if err != nil {
@@ -379,16 +458,12 @@ func (i *Image) ReadFile(filename string) ([]byte, error) {
 		return []byte{}, Fatal(err)
 	}
 
-	buf := make([]byte, 1024)
-	count, err := src.Read(buf)
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, src)
 	if err != nil {
 		return []byte{}, Fatal(err)
 	}
-	log.Printf("read %d bytes\n", count)
-	log.Printf("data: %s\n", string(buf))
-	panic("howdy")
-
-	return buf, nil
+	return buf.Bytes(), nil
 }
 
 // write all files in a directory to the image
@@ -452,4 +527,36 @@ func (i *Image) GetAttr(filename string) (ffs.DirectoryAttr, error) {
 		return 0, Fatalf("not found: %s", filename)
 	}
 	return entry.Attr(), nil
+}
+
+func (i *Image) VolumeLabel() (string, error) {
+	vid, err := i.fs.VolumeLabel()
+	if err != nil {
+		return "", Fatal(err)
+	}
+	return vid, nil
+}
+
+func (i *Image) OEMName() (string, error) {
+	oem, err := i.fs.OEMName()
+	if err != nil {
+		return "", Fatal(err)
+	}
+	return oem, nil
+}
+
+func (i *Image) FATType() (int, error) {
+	fatType, err := i.fs.FATType()
+	if err != nil {
+		return 0, Fatal(err)
+	}
+	return fatType, nil
+}
+
+func (i *Image) Info() (map[string]any, error) {
+	info, err := i.fs.Info()
+	if err != nil {
+		return map[string]any{}, Fatal(err)
+	}
+	return info, nil
 }

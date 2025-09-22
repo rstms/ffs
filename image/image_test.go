@@ -88,18 +88,28 @@ func TestImageAddFiles(t *testing.T) {
 
 func TestImageMungeNoFiles(t *testing.T) {
 	srcFile := filepath.Join("testdata", "src.img")
-	dstFile := filepath.Join("testdata", "dst.img")
+	rewriteFile := filepath.Join("testdata", "rewrite.img")
+	rm(t, rewriteFile)
+	err := RewriteImage(rewriteFile, srcFile, 12, 2880*1024)
+	require.Nil(t, err)
+	dstFile := filepath.Join("testdata", "munged.img")
 	rm(t, dstFile)
-	err := MungeImage(dstFile, srcFile, []string{})
+
+	err = MungeImage(dstFile, rewriteFile, "testdata", []string{})
 	require.Nil(t, err)
 	mdir(t, dstFile)
 }
 
 func TestImageMungeFiles(t *testing.T) {
 	srcFile := filepath.Join("testdata", "src.img")
-	dstFile := filepath.Join("testdata", "dst.img")
+	rewriteFile := filepath.Join("testdata", "rewrite.img")
+	rm(t, rewriteFile)
+	err := RewriteImage(rewriteFile, srcFile, 12, 2880*1024)
+	require.Nil(t, err)
+	dstFile := filepath.Join("testdata", "munged.img")
 	rm(t, dstFile)
-	err := MungeImage(dstFile, srcFile, testFiles())
+
+	err = MungeImage(dstFile, rewriteFile, "testdata", testFiles())
 	require.Nil(t, err)
 	mdir(t, dstFile)
 }
@@ -185,6 +195,29 @@ func TestImageMkdir(t *testing.T) {
 	mdir(t, dstFile)
 }
 
+func TestImageRewrite(t *testing.T) {
+	srcFile := filepath.Join("testdata", "src.img")
+	dstFile := filepath.Join("testdata", "dst.img")
+	err := RewriteImage(dstFile, srcFile, 12, 2880*1024)
+	require.Nil(t, err)
+	mdir(t, dstFile)
+
+	i, err := OpenImage(dstFile)
+	require.Nil(t, err)
+
+	volume, err := i.VolumeLabel()
+	require.Nil(t, err)
+	require.IsType(t, "", volume)
+	require.NotEmpty(t, volume)
+	log.Printf("volume=%s\n", volume)
+
+	oem, err := i.OEMName()
+	require.Nil(t, err)
+	require.IsType(t, "", oem)
+	require.NotEmpty(t, oem)
+	log.Printf("oem=%s\n", oem)
+}
+
 func TestImageImport(t *testing.T) {
 	imgFile := filepath.Join("testdata", "import.img")
 	rm(t, imgFile)
@@ -214,4 +247,62 @@ func TestImageImport(t *testing.T) {
 	require.Nil(t, err)
 	i.Close()
 	mdir(t, imgFile)
+}
+
+func TestImageVolumeLabel(t *testing.T) {
+	imgFile := filepath.Join("testdata", "src.img")
+	i, err := OpenImage(imgFile)
+	require.Nil(t, err)
+	volume, err := i.VolumeLabel()
+	require.Nil(t, err)
+	require.IsType(t, "", volume)
+	log.Printf("volume Label = '%s'\n", volume)
+}
+
+func TestImageOEMName(t *testing.T) {
+	imgFile := filepath.Join("testdata", "src.img")
+	i, err := OpenImage(imgFile)
+	require.Nil(t, err)
+	oem, err := i.OEMName()
+	require.Nil(t, err)
+	require.IsType(t, "", oem)
+	log.Printf("OEM Name = '%s'\n", oem)
+}
+
+func TestImageFATType(t *testing.T) {
+	imgFile := filepath.Join("testdata", "src.img")
+	i, err := OpenImage(imgFile)
+	require.Nil(t, err)
+	fatType, err := i.FATType()
+	require.Nil(t, err)
+	require.IsType(t, int(0), fatType)
+	log.Printf("FAT type = FAT%d\n", fatType)
+}
+
+func TestImageInfo(t *testing.T) {
+	imgFile := filepath.Join("testdata", "src.img")
+	i, err := OpenImage(imgFile)
+	require.Nil(t, err)
+	info, err := i.Info()
+	require.Nil(t, err)
+	for key, value := range info {
+		log.Printf("%s: %v\n", key, value)
+	}
+}
+
+func TestImageReadFile(t *testing.T) {
+	srcFile := filepath.Join("testdata", "src.img")
+	dstFile := filepath.Join("testdata", "dst.img")
+
+	err := RewriteImage(dstFile, srcFile, 12, 2880*1024)
+	require.Nil(t, err)
+
+	i, err := OpenImage(dstFile)
+	require.Nil(t, err)
+	defer i.Close()
+
+	data, err := i.ReadFile("/autoexec.ipxe")
+	require.Nil(t, err)
+
+	log.Printf("%s\n", string(data))
 }

@@ -27,6 +27,24 @@ type BootSectorCommon struct {
 	NumHeads            uint16
 }
 
+func DecodeVolumeLabel(device ffs.BlockDevice, fatType FATType) (string, error) {
+	var sector [512]byte
+	if _, err := device.ReadAt(sector[:], 0); err != nil {
+		return "", Fatal(err)
+	}
+	var offset int
+	switch fatType {
+	case FAT12, FAT16:
+		offset = 43
+	case FAT32:
+		offset = 71
+	default:
+		return "", Fatalf("unexpected FATType: %d", fatType)
+	}
+	label := string(sector[offset : offset+11])
+	return label, nil
+}
+
 // DecodeBootSector takes a BlockDevice and decodes the FAT boot sector
 // from it.
 func DecodeBootSector(device ffs.BlockDevice) (*BootSectorCommon, error) {
