@@ -12,6 +12,8 @@ type FileDisk struct {
 	size int64
 }
 
+var _ BlockDevice = (*FileDisk)(nil)
+
 // NewFileDisk creates a new FileDisk from the given *os.File. The
 // file must already be created and set the to the proper size.
 func NewFileDisk(f *os.File) (*FileDisk, error) {

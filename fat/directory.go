@@ -8,15 +8,18 @@ import (
 	"github.com/rstms/ffs"
 )
 
-// Directory implements fs.Directory and is used to interface with
+// Directory implements ffs.Directory and is used to interface with
 // a directory on a FAT filesystem.
 type Directory struct {
-	device     fs.BlockDevice
+	device     ffs.BlockDevice
 	dirCluster *DirectoryCluster
 	fat        *FAT
 }
 
-// DirectoryEntry implements fs.DirectoryEntry and represents a single
+// ensure Directory implements ffs.Directory
+var _ ffs.Directory = (*Directory)(nil)
+
+// DirectoryEntry implements ffs.DirectoryEntry and represents a single
 // file/folder within a directory in a FAT filesystem. Note that there may be
 // more than one underlying directory entry data structure on the disk to
 // account for long filenames.
@@ -27,6 +30,9 @@ type DirectoryEntry struct {
 
 	name string
 }
+
+// ensure DirectoryEntry implements ffs.DirectoryEntry
+var _ ffs.DirectoryEntry = (*DirectoryEntry)(nil)
 
 // DecodeDirectoryEntry takes a list of entries, decodes the next full
 // DirectoryEntry, and returns the newly created entry, the remaining
@@ -97,7 +103,7 @@ func DecodeDirectoryEntry(d *Directory, entries []*DirectoryClusterEntry) (*Dire
 	return result, entries, nil
 }
 
-func (d *DirectoryEntry) Dir() (fs.Directory, error) {
+func (d *DirectoryEntry) Dir() (ffs.Directory, error) {
 	if !d.IsDir() {
 		panic("not a directory")
 	}
@@ -105,7 +111,7 @@ func (d *DirectoryEntry) Dir() (fs.Directory, error) {
 	dirCluster, err := DecodeDirectoryCluster(
 		d.entry.cluster, d.dir.device, d.dir.fat)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	result := &Directory{
@@ -117,7 +123,7 @@ func (d *DirectoryEntry) Dir() (fs.Directory, error) {
 	return result, nil
 }
 
-func (d *DirectoryEntry) File() (fs.File, error) {
+func (d *DirectoryEntry) File() (ffs.File, error) {
 	if d.IsDir() {
 		panic("not a file")
 	}
@@ -136,11 +142,75 @@ func (d *DirectoryEntry) File() (fs.File, error) {
 }
 
 func (d *DirectoryEntry) IsDir() bool {
-	return (d.entry.attr & AttrDirectory) == AttrDirectory
+	return (d.entry.attr & ffs.AttrDirectory) == ffs.AttrDirectory
+}
+
+func (d *DirectoryEntry) IsVolumeId() bool {
+	return (d.entry.attr & ffs.AttrVolumeId) == ffs.AttrVolumeId
 }
 
 func (d *DirectoryEntry) Name() string {
 	return d.name
+}
+
+func (d *DirectoryEntry) Attr() ffs.DirectoryAttr {
+	return d.entry.attr
+}
+
+func (d *DirectoryEntry) SetAttr(attr ffs.DirectoryAttr, state bool) error {
+	switch attr {
+	case ffs.AttrHidden:
+	case ffs.AttrSystem:
+	case ffs.AttrReadOnly:
+	default:
+		return Fatalf("unsettable attribute")
+	}
+	if state {
+		d.entry.attr |= attr
+	} else {
+		d.entry.attr &= ^attr
+	}
+	err := d.dir.dirCluster.WriteToDevice(d.dir.device, d.dir.fat)
+	if err != nil {
+		return Fatal(err)
+	}
+	return nil
+}
+
+func (d *DirectoryEntry) SetReadOnly(state bool) error {
+	err := d.SetAttr(ffs.AttrReadOnly, state)
+	if err != nil {
+		return Fatal(err)
+	}
+	return nil
+}
+
+func (d *DirectoryEntry) SetSystem(state bool) error {
+	err := d.SetAttr(ffs.AttrSystem, state)
+	if err != nil {
+		return Fatal(err)
+	}
+	return nil
+}
+
+func (d *DirectoryEntry) SetHidden(state bool) error {
+	err := d.SetAttr(ffs.AttrHidden, state)
+	if err != nil {
+		return Fatal(err)
+	}
+	return nil
+}
+
+func (d *DirectoryEntry) IsReadOnly() bool {
+	return d.entry.attr&ffs.AttrReadOnly == ffs.AttrReadOnly
+}
+
+func (d *DirectoryEntry) IsSystem() bool {
+	return d.entry.attr&ffs.AttrSystem == ffs.AttrSystem
+}
+
+func (d *DirectoryEntry) IsHidden() bool {
+	return d.entry.attr&ffs.AttrHidden == ffs.AttrHidden
 }
 
 func (d *DirectoryEntry) ShortName() string {
@@ -151,10 +221,10 @@ func (d *DirectoryEntry) ShortName() string {
 	return fmt.Sprintf("%s.%s", d.entry.name, d.entry.ext)
 }
 
-func (d *Directory) AddDirectory(name string) (fs.DirectoryEntry, error) {
-	entry, err := d.addEntry(name, AttrDirectory)
+func (d *Directory) AddDirectory(name string) (ffs.DirectoryEntry, error) {
+	entry, err := d.addEntry(name, ffs.AttrDirectory)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	// Create the new directory cluster
@@ -162,24 +232,24 @@ func (d *Directory) AddDirectory(name string) (fs.DirectoryEntry, error) {
 		entry.entry.cluster, d.dirCluster.startCluster, entry.entry.createTime)
 
 	if err := newDirCluster.WriteToDevice(d.device, d.fat); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	return entry, nil
 }
 
-func (d *Directory) AddFile(name string) (fs.DirectoryEntry, error) {
-	entry, err := d.addEntry(name, DirectoryAttr(0))
+func (d *Directory) AddFile(name string) (ffs.DirectoryEntry, error) {
+	entry, err := d.addEntry(name, ffs.DirectoryAttr(0))
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	return entry, nil
 }
 
-func (d *Directory) Entries() []fs.DirectoryEntry {
+func (d *Directory) Entries() []ffs.DirectoryEntry {
 	entries := d.dirCluster.entries
-	result := make([]fs.DirectoryEntry, 0, len(entries)/2)
+	result := make([]ffs.DirectoryEntry, 0, len(entries)/2)
 	for len(entries) > 0 {
 		var entry *DirectoryEntry
 		entry, entries, _ = DecodeDirectoryEntry(d, entries)
@@ -191,7 +261,7 @@ func (d *Directory) Entries() []fs.DirectoryEntry {
 	return result
 }
 
-func (d *Directory) Entry(name string) fs.DirectoryEntry {
+func (d *Directory) Entry(name string) ffs.DirectoryEntry {
 	name = strings.ToUpper(name)
 
 	for _, entry := range d.Entries() {
@@ -203,14 +273,14 @@ func (d *Directory) Entry(name string) fs.DirectoryEntry {
 	return nil
 }
 
-func (d *Directory) addEntry(name string, attr DirectoryAttr) (*DirectoryEntry, error) {
+func (d *Directory) addEntry(name string, attr ffs.DirectoryAttr) (*DirectoryEntry, error) {
 	name = strings.TrimSpace(name)
 
 	entries := d.Entries()
 	usedNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if strings.ToUpper(entry.Name()) == strings.ToUpper(name) {
-			return nil, fmt.Errorf("name already exists: %s", name)
+			return nil, Fatalf("name already exists: %s", name)
 		}
 
 		// Add it to the list of used names
@@ -220,21 +290,21 @@ func (d *Directory) addEntry(name string, attr DirectoryAttr) (*DirectoryEntry, 
 
 	shortName, err := generateShortName(name, usedNames)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	var lfnEntries []*DirectoryClusterEntry
 	if shortName != strings.ToUpper(name) {
 		lfnEntries, err = NewLongDirectoryClusterEntry(name, shortName)
 		if err != nil {
-			return nil, err
+			return nil, Fatal(err)
 		}
 	}
 
 	// Allocate space for a cluster
 	startCluster, err := d.fat.AllocChain()
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	createTime := time.Now()
@@ -256,7 +326,7 @@ func (d *Directory) addEntry(name string, attr DirectoryAttr) (*DirectoryEntry, 
 
 	// Write the new FAT out
 	if err := d.fat.WriteToDevice(d.device); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	// Write the entries out in this directory
@@ -266,7 +336,7 @@ func (d *Directory) addEntry(name string, attr DirectoryAttr) (*DirectoryEntry, 
 	d.dirCluster.entries = append(d.dirCluster.entries, shortEntry)
 
 	if err := d.dirCluster.WriteToDevice(d.device, d.fat); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	newEntry := &DirectoryEntry{

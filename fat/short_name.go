@@ -83,7 +83,7 @@ func generateShortName(longName string, used []string) (string, error) {
 		}
 
 		if !found {
-			return "", fmt.Errorf("could not generate short name for %s", longName)
+			return "", Fatalf("could not generate short name for %s", longName)
 		}
 	}
 

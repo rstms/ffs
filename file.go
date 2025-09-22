@@ -6,4 +6,5 @@ import "io"
 type File interface {
 	io.Reader
 	io.Writer
+	Close() error
 }

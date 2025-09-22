@@ -26,7 +26,7 @@ func TestAddFile(t *testing.T) {
 	}
 
 	// BlockDevice backed by the file for our filesystem
-	device, err := fs.NewFileDisk(floppyF)
+	device, err := ffs.NewFileDisk(floppyF)
 	if err != nil {
 		t.Fatalf("Error creating floppy: %s", err)
 	}
@@ -77,26 +77,26 @@ func TestAddFile(t *testing.T) {
 	}
 }
 
-func addSingleFile(dir fs.Directory, src string) error {
+func addSingleFile(dir ffs.Directory, src string) error {
 	inputF, err := os.Create(src)
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 	defer inputF.Close()
 	defer os.Remove(src)
 
 	entry, err := dir.AddFile(filepath.Base(src))
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	fatFile, err := entry.File()
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	if _, err := io.Copy(fatFile, inputF); err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	return nil

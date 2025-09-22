@@ -1,8 +1,6 @@
 package fat
 
 import (
-	"errors"
-	"fmt"
 	"math"
 
 	"github.com/rstms/ffs"
@@ -18,14 +16,14 @@ type FAT struct {
 	entries []uint32
 }
 
-func DecodeFAT(device fs.BlockDevice, bs *BootSectorCommon, n int) (*FAT, error) {
+func DecodeFAT(device ffs.BlockDevice, bs *BootSectorCommon, n int) (*FAT, error) {
 	if n > int(bs.NumFATs) {
-		return nil, fmt.Errorf("FAT #%d greater than total FATs: %d", n, bs.NumFATs)
+		return nil, Fatalf("FAT #%d greater than total FATs: %d", n, bs.NumFATs)
 	}
 
 	data := make([]byte, bs.SectorsPerFat*uint32(bs.BytesPerSector))
 	if _, err := device.ReadAt(data, int64(bs.FATOffset(n))); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	result := &FAT{
@@ -106,7 +104,7 @@ func (f *FAT) allocNew() (uint32, error) {
 	}
 
 	if !found {
-		return 0, errors.New("FAT FULL")
+		return 0, Fatalf("FAT FULL")
 	}
 
 	// Mark that this is now in use
@@ -156,7 +154,7 @@ func (f *FAT) ResizeChain(start uint32, length int) ([]uint32, error) {
 		for i := 0; i < change; i++ {
 			newCluster, err := f.allocNew()
 			if err != nil {
-				return nil, err
+				return nil, Fatal(err)
 			}
 
 			f.entries[lastCluster] = newCluster
@@ -169,12 +167,12 @@ func (f *FAT) ResizeChain(start uint32, length int) ([]uint32, error) {
 	return f.Chain(start), nil
 }
 
-func (f *FAT) WriteToDevice(device fs.BlockDevice) error {
+func (f *FAT) WriteToDevice(device ffs.BlockDevice) error {
 	fatBytes := f.Bytes()
 	for i := 0; i < int(f.bs.NumFATs); i++ {
 		offset := int64(f.bs.FATOffset(i))
 		if _, err := device.WriteAt(fatBytes, offset); err != nil {
-			return err
+			return Fatal(err)
 		}
 	}
 

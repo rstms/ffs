@@ -8,7 +8,7 @@ import (
 )
 
 type ClusterChain struct {
-	device       fs.BlockDevice
+	device       ffs.BlockDevice
 	fat          *FAT
 	startCluster uint32
 	readOffset   uint32

@@ -3,7 +3,6 @@ package fat
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -11,18 +10,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/rstms/ffs"
-)
-
-type DirectoryAttr uint8
-
-const (
-	AttrReadOnly  DirectoryAttr = 0x01
-	AttrHidden                  = 0x02
-	AttrSystem                  = 0x04
-	AttrVolumeId                = 0x08
-	AttrDirectory               = 0x10
-	AttrArchive                 = 0x20
-	AttrLongName                = AttrReadOnly | AttrHidden | AttrSystem | AttrVolumeId
 )
 
 // The size in bytes of a single directory entry.
@@ -44,7 +31,7 @@ type DirectoryCluster struct {
 type DirectoryClusterEntry struct {
 	name       string
 	ext        string
-	attr       DirectoryAttr
+	attr       ffs.DirectoryAttr
 	createTime time.Time
 	accessTime time.Time
 	writeTime  time.Time
@@ -57,7 +44,7 @@ type DirectoryClusterEntry struct {
 	longChecksum uint8
 }
 
-func DecodeDirectoryCluster(startCluster uint32, device fs.BlockDevice, fat *FAT) (*DirectoryCluster, error) {
+func DecodeDirectoryCluster(startCluster uint32, device ffs.BlockDevice, fat *FAT) (*DirectoryCluster, error) {
 	bs := fat.bs
 	chain := fat.Chain(startCluster)
 	data := make([]byte, uint32(len(chain))*bs.BytesPerCluster())
@@ -67,13 +54,13 @@ func DecodeDirectoryCluster(startCluster uint32, device fs.BlockDevice, fat *FAT
 		chainData := data[dataOffset : dataOffset+bs.BytesPerCluster()]
 
 		if _, err := device.ReadAt(chainData, devOffset); err != nil {
-			return nil, err
+			return nil, Fatal(err)
 		}
 	}
 
 	result, err := decodeDirectoryCluster(data, bs)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	result.startCluster = startCluster
@@ -82,7 +69,7 @@ func DecodeDirectoryCluster(startCluster uint32, device fs.BlockDevice, fat *FAT
 
 // DecodeFAT16RootDirectory decodes the FAT32 oroot directory structure
 // from the device.
-func DecodeFAT32RootDirectoryCluster(device fs.BlockDevice, fat *FAT) (*DirectoryCluster, error) {
+func DecodeFAT32RootDirectoryCluster(device ffs.BlockDevice, fat *FAT) (*DirectoryCluster, error) {
 	// 2 is typically the root dir for FAT32
 	// FIXME: read from BootSectorCommon and BPB_RootClus there
 	return DecodeDirectoryCluster(2, device, fat)
@@ -90,15 +77,15 @@ func DecodeFAT32RootDirectoryCluster(device fs.BlockDevice, fat *FAT) (*Director
 
 // DecodeFAT16RootDirectory decodes the FAT16 root directory structure
 // from the device.
-func DecodeFAT16RootDirectoryCluster(device fs.BlockDevice, bs *BootSectorCommon) (*DirectoryCluster, error) {
+func DecodeFAT16RootDirectoryCluster(device ffs.BlockDevice, bs *BootSectorCommon) (*DirectoryCluster, error) {
 	data := make([]byte, DirectoryEntrySize*bs.RootEntryCount)
 	if _, err := device.ReadAt(data, int64(bs.RootDirOffset())); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	result, err := decodeDirectoryCluster(data, bs)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	result.fat16Root = true
@@ -116,7 +103,7 @@ func decodeDirectoryCluster(data []byte, bs *BootSectorCommon) (*DirectoryCluste
 
 		entry, err := DecodeDirectoryClusterEntry(entryData)
 		if err != nil {
-			return nil, err
+			return nil, Fatal(err)
 		}
 
 		entries = append(entries, entry)
@@ -137,7 +124,7 @@ func NewDirectoryCluster(start uint32, parent uint32, t time.Time) *DirectoryClu
 	cluster.entries = []*DirectoryClusterEntry{
 		{
 			accessTime: t,
-			attr:       AttrDirectory,
+			attr:       ffs.AttrDirectory,
 			cluster:    start,
 			createTime: t,
 			name:       ".",
@@ -145,7 +132,7 @@ func NewDirectoryCluster(start uint32, parent uint32, t time.Time) *DirectoryClu
 		},
 		{
 			accessTime: t,
-			attr:       AttrDirectory,
+			attr:       ffs.AttrDirectory,
 			cluster:    parent,
 			createTime: t,
 			name:       "..",
@@ -160,7 +147,7 @@ func NewDirectoryCluster(start uint32, parent uint32, t time.Time) *DirectoryClu
 // to be the root directory of a FAT12/FAT16 filesystem.
 func NewFat16RootDirectoryCluster(bs *BootSectorCommon, label string) (*DirectoryCluster, error) {
 	if bs.RootEntryCount == 0 {
-		return nil, errors.New("root entry count is 0 in boot sector")
+		return nil, Fatalf("root entry count is 0 in boot sector")
 	}
 
 	result := &DirectoryCluster{
@@ -169,7 +156,7 @@ func NewFat16RootDirectoryCluster(bs *BootSectorCommon, label string) (*Director
 
 	// Create the volume ID entry
 	result.entries[0] = &DirectoryClusterEntry{
-		attr:    AttrVolumeId,
+		attr:    ffs.AttrVolumeId,
 		name:    label,
 		cluster: 0,
 	}
@@ -191,12 +178,12 @@ func (d *DirectoryCluster) Bytes() []byte {
 }
 
 // WriteToDevice writes the cluster to the device.
-func (d *DirectoryCluster) WriteToDevice(device fs.BlockDevice, fat *FAT) error {
+func (d *DirectoryCluster) WriteToDevice(device ffs.BlockDevice, fat *FAT) error {
 	if d.fat16Root {
 		// Write the cluster to the FAT16 root directory location
 		offset := int64(fat.bs.RootDirOffset())
 		if _, err := device.WriteAt(d.Bytes(), offset); err != nil {
-			return err
+			return Fatal(err)
 		}
 	} else {
 		chain := &ClusterChain{
@@ -206,7 +193,7 @@ func (d *DirectoryCluster) WriteToDevice(device fs.BlockDevice, fat *FAT) error 
 		}
 
 		if _, err := chain.Write(d.Bytes()); err != nil {
-			return err
+			return Fatal(err)
 		}
 	}
 
@@ -240,7 +227,7 @@ func (d *DirectoryClusterEntry) Bytes() []byte {
 		}
 
 		// LDIR_Attr
-		result[11] = byte(AttrLongName)
+		result[11] = byte(ffs.AttrLongName)
 
 		// LDIR_Type
 		result[12] = 0
@@ -308,11 +295,11 @@ func (d *DirectoryClusterEntry) Bytes() []byte {
 
 // IsLong returns true if this is a long entry.
 func (d *DirectoryClusterEntry) IsLong() bool {
-	return (d.attr & AttrLongName) == AttrLongName
+	return (d.attr & ffs.AttrLongName) == ffs.AttrLongName
 }
 
 func (d *DirectoryClusterEntry) IsVolumeId() bool {
-	return d.attr == AttrVolumeId
+	return d.attr == ffs.AttrVolumeId
 }
 
 // DecodeDirectoryClusterEntry decodes a single directory entry in the
@@ -321,8 +308,8 @@ func DecodeDirectoryClusterEntry(data []byte) (*DirectoryClusterEntry, error) {
 	var result DirectoryClusterEntry
 
 	// Do the attributes so we can determine if we're dealing with long names
-	result.attr = DirectoryAttr(data[11])
-	if (result.attr & AttrLongName) == AttrLongName {
+	result.attr = ffs.DirectoryAttr(data[11])
+	if (result.attr & ffs.AttrLongName) == ffs.AttrLongName {
 		result.longOrd = data[0]
 
 		chars := make([]uint16, 13)
@@ -403,7 +390,7 @@ func NewLongDirectoryClusterEntry(name string, shortName string) ([]*DirectoryCl
 	for i := 0; i < numLongEntries; i++ {
 		entries[i] = new(DirectoryClusterEntry)
 		entry := entries[i]
-		entry.attr = AttrLongName
+		entry.attr = ffs.AttrLongName
 		entry.longOrd = uint8(numLongEntries - i)
 
 		if i == 0 {

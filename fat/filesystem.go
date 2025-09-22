@@ -4,26 +4,26 @@ import (
 	"github.com/rstms/ffs"
 )
 
-// FileSystem is the implementation of fs.FileSystem that can read a
+// FileSystem is the implementation of ffs.FileSystem that can read a
 // FAT filesystem.
 type FileSystem struct {
 	bs      *BootSectorCommon
-	device  fs.BlockDevice
+	device  ffs.BlockDevice
 	fat     *FAT
 	rootDir *DirectoryCluster
 }
 
 // New returns a new FileSystem for accessing a previously created
 // FAT filesystem.
-func New(device fs.BlockDevice) (*FileSystem, error) {
+func New(device ffs.BlockDevice) (*FileSystem, error) {
 	bs, err := DecodeBootSector(device)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	fat, err := DecodeFAT(device, bs, 0)
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	var rootDir *DirectoryCluster
@@ -31,12 +31,12 @@ func New(device fs.BlockDevice) (*FileSystem, error) {
 		// WARNING: very experimental and incomplete
 		rootDir, err = DecodeFAT32RootDirectoryCluster(device, fat)
 		if err != nil {
-			return nil, err
+			return nil, Fatal(err)
 		}
 	} else {
 		rootDir, err = DecodeFAT16RootDirectoryCluster(device, bs)
 		if err != nil {
-			return nil, err
+			return nil, Fatal(err)
 		}
 	}
 
@@ -50,7 +50,7 @@ func New(device fs.BlockDevice) (*FileSystem, error) {
 	return result, nil
 }
 
-func (f *FileSystem) RootDir() (fs.Directory, error) {
+func (f *FileSystem) RootDir() (ffs.Directory, error) {
 	dir := &Directory{
 		device:     f.device,
 		dirCluster: f.rootDir,

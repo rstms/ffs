@@ -13,7 +13,7 @@ const (
 
 // TypeForDevice determines the usable FAT type based solely on
 // size information about the block device.
-func TypeForDevice(device fs.BlockDevice) FATType {
+func TypeForDevice(device ffs.BlockDevice) FATType {
 	sizeInMB := device.Len() / (1024 * 1024)
 	switch {
 	case sizeInMB < 4:

@@ -1,8 +1,6 @@
 package fat
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/rstms/ffs"
@@ -22,11 +20,11 @@ type SuperFloppyConfig struct {
 	OEMName string
 }
 
-// Formats an fs.BlockDevice with the "super floppy" format according
+// Formats an ffs.BlockDevice with the "super floppy" format according
 // to the given configuration. The "super floppy" standard means that the
 // device will be formatted so that it does not contain a partition table.
 // Instead, the entire device holds a single FAT file system.
-func FormatSuperFloppy(device fs.BlockDevice, config *SuperFloppyConfig) error {
+func FormatSuperFloppy(device ffs.BlockDevice, config *SuperFloppyConfig) error {
 	formatter := &superFloppyFormatter{
 		config: config,
 		device: device,
@@ -39,7 +37,7 @@ func FormatSuperFloppy(device fs.BlockDevice, config *SuperFloppyConfig) error {
 // during a single formatting pass.
 type superFloppyFormatter struct {
 	config *SuperFloppyConfig
-	device fs.BlockDevice
+	device ffs.BlockDevice
 }
 
 func (f *superFloppyFormatter) format() error {
@@ -47,7 +45,7 @@ func (f *superFloppyFormatter) format() error {
 	// the common elements of the boot sector.
 	sectorsPerCluster, err := f.SectorsPerCluster()
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	bsCommon := BootSectorCommon{
@@ -101,11 +99,11 @@ func (f *superFloppyFormatter) format() error {
 		// Write the boot sector
 		bsBytes, err := bs.Bytes()
 		if err != nil {
-			return err
+			return Fatal(err)
 		}
 
 		if _, err := f.device.WriteAt(bsBytes, 0); err != nil {
-			return err
+			return Fatal(err)
 		}
 	case FAT32:
 		bsCommon.SectorsPerFat = f.sectorsPerFat(0, sectorsPerCluster)
@@ -121,28 +119,28 @@ func (f *superFloppyFormatter) format() error {
 		// Write the boot sector
 		bsBytes, err := bs.Bytes()
 		if err != nil {
-			return err
+			return Fatal(err)
 		}
 
 		if _, err := f.device.WriteAt(bsBytes, 0); err != nil {
-			return err
+			return Fatal(err)
 		}
 
 		// TODO(mitchellh): Create the fsinfo structure
 		// TODO(mitchellh): write the boot sector copy
 	default:
-		return fmt.Errorf("Unknown FAT type: %d", f.config.FATType)
+		return Fatalf("Unknown FAT type: %d", f.config.FATType)
 	}
 
 	// Create the FATs
 	fat, err := NewFAT(&bsCommon)
 	if err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	// Write the FAT
 	if err := fat.WriteToDevice(f.device); err != nil {
-		return err
+		return Fatal(err)
 	}
 
 	var rootDir *DirectoryCluster
@@ -151,12 +149,12 @@ func (f *superFloppyFormatter) format() error {
 	} else {
 		rootDir, err = NewFat16RootDirectoryCluster(&bsCommon, f.config.Label)
 		if err != nil {
-			return err
+			return Fatal(err)
 		}
 
 		offset := int64(bsCommon.RootDirOffset())
 		if _, err := f.device.WriteAt(rootDir.Bytes(), offset); err != nil {
-			return err
+			return Fatal(err)
 		}
 	}
 
@@ -188,7 +186,7 @@ func (f *superFloppyFormatter) defaultSectorsPerCluster12() (uint8, error) {
 	for (sectors / int64(result)) > 4084 {
 		result *= 2
 		if int(result)*f.device.SectorSize() > 4096 {
-			return 0, errors.New("disk too large for FAT12")
+			return 0, Fatalf("disk too large for FAT12")
 		}
 	}
 
@@ -199,9 +197,9 @@ func (f *superFloppyFormatter) defaultSectorsPerCluster16() (uint8, error) {
 	sectors := f.device.Len() / int64(f.device.SectorSize())
 
 	if sectors <= 8400 {
-		return 0, errors.New("disk too small for FAT16")
+		return 0, Fatalf("disk too small for FAT16")
 	} else if sectors > 4194304 {
-		return 0, errors.New("disk too large for FAT16")
+		return 0, Fatalf("disk too large for FAT16")
 	}
 
 	switch {
@@ -224,7 +222,7 @@ func (f *superFloppyFormatter) defaultSectorsPerCluster32() (uint8, error) {
 	sectors := f.device.Len() / int64(f.device.SectorSize())
 
 	if sectors <= 66600 {
-		return 0, errors.New("disk too small for FAT32")
+		return 0, Fatalf("disk too small for FAT32")
 	}
 
 	switch {

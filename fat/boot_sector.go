@@ -2,8 +2,6 @@ package fat
 
 import (
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"unicode"
 
 	"github.com/rstms/ffs"
@@ -31,14 +29,14 @@ type BootSectorCommon struct {
 
 // DecodeBootSector takes a BlockDevice and decodes the FAT boot sector
 // from it.
-func DecodeBootSector(device fs.BlockDevice) (*BootSectorCommon, error) {
+func DecodeBootSector(device ffs.BlockDevice) (*BootSectorCommon, error) {
 	var sector [512]byte
 	if _, err := device.ReadAt(sector[:], 0); err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	if sector[510] != 0x55 || sector[511] != 0xAA {
-		return nil, errors.New("corrupt boot sector signature")
+		return nil, Fatalf("corrupt boot sector signature")
 	}
 
 	result := new(BootSectorCommon)
@@ -95,12 +93,12 @@ func (b *BootSectorCommon) Bytes() ([]byte, error) {
 
 	// BS_OEMName
 	if len(b.OEMName) > 8 {
-		return nil, errors.New("OEMName must be 8 bytes or less")
+		return nil, Fatalf("OEMName must be 8 bytes or less")
 	}
 
 	for i, r := range b.OEMName {
 		if r > unicode.MaxASCII {
-			return nil, fmt.Errorf("%#U in OEM name not a valid ASCII char. Must be ASCII.", r)
+			return nil, Fatalf("%#U in OEM name not a valid ASCII char. Must be ASCII.", r)
 		}
 
 		sector[0x3+i] = byte(r)
@@ -213,7 +211,7 @@ type BootSectorFat16 struct {
 func (b *BootSectorFat16) Bytes() ([]byte, error) {
 	sector, err := b.BootSectorCommon.Bytes()
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	// BPB_TotSec16 AND BPB_TotSec32
@@ -225,7 +223,7 @@ func (b *BootSectorFat16) Bytes() ([]byte, error) {
 
 	// BPB_FATSz16
 	if b.SectorsPerFat > 0x10000 {
-		return nil, fmt.Errorf("SectorsPerFat value too big for non-FAT32: %d", b.SectorsPerFat)
+		return nil, Fatalf("SectorsPerFat value too big for non-FAT32: %d", b.SectorsPerFat)
 	}
 
 	binary.LittleEndian.PutUint16(sector[22:24], uint16(b.SectorsPerFat))
@@ -241,12 +239,12 @@ func (b *BootSectorFat16) Bytes() ([]byte, error) {
 
 	// BS_VolLab
 	if len(b.VolumeLabel) > 11 {
-		return nil, errors.New("VolumeLabel must be 11 bytes or less")
+		return nil, Fatalf("VolumeLabel must be 11 bytes or less")
 	}
 
 	for i, r := range b.VolumeLabel {
 		if r > unicode.MaxASCII {
-			return nil, fmt.Errorf("%#U in VolumeLabel not a valid ASCII char. Must be ASCII.", r)
+			return nil, Fatalf("%#U in VolumeLabel not a valid ASCII char. Must be ASCII.", r)
 		}
 
 		sector[43+i] = byte(r)
@@ -254,12 +252,12 @@ func (b *BootSectorFat16) Bytes() ([]byte, error) {
 
 	// BS_FilSysType
 	if len(b.FileSystemTypeLabel) > 8 {
-		return nil, errors.New("FileSystemTypeLabel must be 8 bytes or less")
+		return nil, Fatalf("FileSystemTypeLabel must be 8 bytes or less")
 	}
 
 	for i, r := range b.FileSystemTypeLabel {
 		if r > unicode.MaxASCII {
-			return nil, fmt.Errorf("%#U in FileSystemTypeLabel not a valid ASCII char. Must be ASCII.", r)
+			return nil, Fatalf("%#U in FileSystemTypeLabel not a valid ASCII char. Must be ASCII.", r)
 		}
 
 		sector[54+i] = byte(r)
@@ -283,7 +281,7 @@ type BootSectorFat32 struct {
 func (b *BootSectorFat32) Bytes() ([]byte, error) {
 	sector, err := b.BootSectorCommon.Bytes()
 	if err != nil {
-		return nil, err
+		return nil, Fatal(err)
 	}
 
 	// BPB_RootEntCount - must be 0
@@ -320,12 +318,12 @@ func (b *BootSectorFat32) Bytes() ([]byte, error) {
 
 	// BS_VolLab
 	if len(b.VolumeLabel) > 11 {
-		return nil, errors.New("VolumeLabel must be 11 bytes or less")
+		return nil, Fatalf("VolumeLabel must be 11 bytes or less")
 	}
 
 	for i, r := range b.VolumeLabel {
 		if r > unicode.MaxASCII {
-			return nil, fmt.Errorf("%#U in VolumeLabel not a valid ASCII char. Must be ASCII.", r)
+			return nil, Fatalf("%#U in VolumeLabel not a valid ASCII char. Must be ASCII.", r)
 		}
 
 		sector[71+i] = byte(r)
@@ -333,12 +331,12 @@ func (b *BootSectorFat32) Bytes() ([]byte, error) {
 
 	// BS_FilSysType
 	if len(b.FileSystemTypeLabel) > 8 {
-		return nil, errors.New("FileSystemTypeLabel must be 8 bytes or less")
+		return nil, Fatalf("FileSystemTypeLabel must be 8 bytes or less")
 	}
 
 	for i, r := range b.FileSystemTypeLabel {
 		if r > unicode.MaxASCII {
-			return nil, fmt.Errorf("%#U in FileSystemTypeLabel not a valid ASCII char. Must be ASCII.", r)
+			return nil, Fatalf("%#U in FileSystemTypeLabel not a valid ASCII char. Must be ASCII.", r)
 		}
 
 		sector[82+i] = byte(r)

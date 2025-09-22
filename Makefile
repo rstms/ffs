@@ -40,7 +40,6 @@ release:
 update:
 	@echo checking dependencies for updated versions
 	@echo "rstms_modules=$(rstms_modules)"
-	@curl -s -L -o cmd/common.go https://raw.githubusercontent.com/rstms/go-common/master/proxy_common_go
 	@$(foreach m,$(rstms_modules),go get $(m)@$(call latest_module_release,$(m));)
 
 clean:

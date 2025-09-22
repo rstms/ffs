@@ -18,9 +18,13 @@ func (f *File) Write(p []byte) (n int, err error) {
 
 		// Write the entry out
 		if err := f.dir.dirCluster.WriteToDevice(f.dir.device, f.dir.fat); err != nil {
-			return 0, err
+			return 0, Fatal(err)
 		}
 	}
 
 	return f.chain.Write(p)
+}
+
+func (f *File) Close() error {
+	return nil
 }
