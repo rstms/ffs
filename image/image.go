@@ -7,7 +7,6 @@ import (
 	"github.com/rstms/ffs/fat"
 	"io"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -479,7 +478,7 @@ func (i *Image) Import(filename string) error {
 		if err != nil {
 			return Fatal(err)
 		}
-		log.Printf("dir=%v dst=%s, path=%s\n", d.IsDir(), dst, path)
+		//log.Printf("dir=%v dst=%s, path=%s\n", d.IsDir(), dst, path)
 		if d.IsDir() {
 			err := i.Mkdir(dst)
 			if err != nil {
